@@ -32,6 +32,7 @@ class FilterBank:
 		grid: a tuple containing meshgrid of x and y coordinates.
 		sigma: standard deviation for Gaussian.
 		elongation: ratio between sigma_x and sigma_y.
+		elongate: 'yes' or 'no' to elongate the Gaussian filter.
 		"""
 		x, y = grid
 		sigma_x = sigma
@@ -48,6 +49,18 @@ class FilterBank:
  
 
 	def derivative_gaussian_filter(self, grid, sigma, elongation, order, elongate = 'yes'):
+		"""
+		Generate a 2D Gaussian derivative filter (first or second order) or Laplacian.
+
+		Parameters:
+		grid (tuple): A tuple containing the x and y meshgrid.
+		sigma (float): Standard deviation for the Gaussian.
+		elongation (float): Ratio to elongate the Gaussian in the y-direction (anisotropy).
+		order (list): Derivative order, e.g., [1, 0] for first derivative in x, [0, 2] for second derivative in y.
+
+		Returns:
+		numpy.ndarray: The computed derivative of the 2D Gaussian.
+		"""
     
 		gaussian = self.gaussian_filter(grid, sigma, elongation, elongate)
 		x, y = grid
@@ -110,6 +123,15 @@ class FilterBank:
 		return derivative_gaussian_filters
 
 	def LM(self, type):
+		"""
+		Generate the Leung-Malik (LM) filter bank.
+
+		Parameters:
+		type (str): 'small' for the LM Small filter bank or anything else for LM Large.
+
+		Returns:
+		list: A list of filters in the LM filter bank.
+		"""
 		size = 49
 		bound = size // 2
 		spread = np.linspace(-bound, bound, size)
@@ -132,31 +154,54 @@ class FilterBank:
 			second_derivative_x = self.derivative_gaussian_filter(grid, sigma, elongation, order = [2, 0], elongate = 'yes')
 			second_derivative_gaussian = second_derivative_x 
 			
+			# Generate the first-order derivatives of the 2D Gaussian filter at multiple orientations.
 			for i in range(orientations):
 				angle = i * 360 / orientations
 				rot_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
 				first_derivative_rotated = cv2.warpAffine(first_derivative_gaussian, rot_matrix, (size, size))
 				LM_filters.append(first_derivative_rotated)
-
+    
+			# Generate the second-order derivatives of the 2D Gaussian filter at multiple orientations.
 			for i in range(orientations):
 				angle = i * 360 / orientations
 				rot_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
 				second_derivative_rotated = cv2.warpAffine(second_derivative_gaussian, rot_matrix, (size, size))
 				LM_filters.append(second_derivative_rotated)
-				
+		
+		# Generate Laplacian of Gaussian filters at multiple scales.
 		for sigma in scales:
 			laplacian = self.derivative_gaussian_filter(grid, sigma, elongation, order = [2, 2], elongate = 'no')
 			LM_filters.append(laplacian)
 			
+		# Generate Laplacian of Gaussian filters at 3 * scales.
 		for sigma in scales:
 			laplacian = self.derivative_gaussian_filter(grid, sigma*3, elongation, order = [2, 2], elongate = 'no')
 			LM_filters.append(laplacian)
-			
+		
+		# Gaussian Smoothing Filters
 		for sigma in scales:
 			gaussian = self.gaussian_filter(grid, sigma, elongation, elongate = 'no')
 			LM_filters.append(gaussian)
 			
 		return LM_filters
+
+	def gabor(self, orientation, sigma, gamma, psi):
+		size = 49
+		bounds = size // 2
+		spread = np.linspace(-bounds, bounds, size)
+		x, y = np.meshgrid(spread, spread)
+		gabor_filters = []
+		nlambdas = [2, 5, 10, 15, 20]
+
+		for lambda_ in nlambdas:
+			for i in range(orientation):
+				theta = i * pi / orientation
+				x_theta = x * np.cos(theta) + y * np.sin(theta)
+				y_theta = -x * np.sin(theta) + y * np.cos(theta)
+				gb = np.exp(-0.5 * (x_theta**2 + (gamma**2 * y_theta**2)) / (sigma**2)) * np.cos((2 * pi * x_theta / lambda_) + psi)       
+				gabor_filters.append(gb)
+
+		return gabor_filters
     
 
 def main():
@@ -208,7 +253,15 @@ def main():
 	Display all the filters in this filter bank and save image as Gabor.png,
 	use command "cv2.imwrite(...)"
 	"""
-
+	gabor_filters = filter_bank.gabor(orientation = 8, sigma = 8, gamma = 0.65, psi = 0)
+	fig, axs = plt.subplots(5, 8, figsize=(30, 10))
+	for i, filter in enumerate(gabor_filters):
+		axs[i//8, i%8].imshow(filter, cmap='gray')
+		axs[i//8, i%8].axis('off')
+  
+	plt.savefig('Gabor.png')
+	plt.show()
+	plt.close()
 
 	"""
 	Generate Half-disk masks
