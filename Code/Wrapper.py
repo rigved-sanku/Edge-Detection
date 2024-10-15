@@ -6,26 +6,84 @@ edge detection methods for more robust and accurate edge detection.
 
 Project Details: https://rbe549.github.io/spring2024/hw/hw0/
 
-
 Author : 
 Rigved Sanku (rsanku@wpi.edu)
 MS at Robotics Engineering Department,
 Worcester Polytechnic Institute
 """
 
-# Code starts here:
-
+from typing import List
+from numpy import sqrt, pi, reshape, sin, cos
+import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 
+
+
+class FilterBank:
+    
+	def __init__(self):
+		pass
+	
+ 
+	def gaussian2D(self, grid, sigma, elongation=1):
+		"""
+		Returns a 2D Gaussian filter
+		"""
+		x = grid[0]
+		y = grid[1]
+		sigma_x = sigma
+		sigma_y = sigma_x * elongation
+		numerator = np.exp(-(x**2/(2*sigma_x**2) + y**2/(2*sigma_y**2)))
+		denominator = 2 * pi * sigma_x * sigma_y
+		return numerator / denominator
+
+
+	def dog_filter_bank(self, ):
+		scale_sigma = [1 , sqrt(2)]
+		sobel_x = [[1, 0, -1], [2, 0, -2], [1, 0, -1]] # Sobel filter in x direction
+		sobel_y = [[1, 2, 1], [0, 0, 0], [-1, -2, -1]] # Sobel filter in y direction
+		size = 7
+		angles = 16
+		bounds = size // 2
+		spread = np.linspace(-bounds, bounds, size)
+		x, y = np.meshgrid(spread, spread)
+		points = [x.flatten(), y.flatten()]
+
+		DOG_filters = []
+
+		for sigma in scale_sigma:
+			gaussian = self.gaussian2D(points, sigma)
+			gaussian = reshape(gaussian, (size, size))
+			DOG = cv2.filter2D(gaussian, ddepth=-1, kernel = np.array(sobel_x))
+			for i in range(angles):
+				angle = i * 360 / angles
+				rot_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
+				DOG_rot = cv2.warpAffine(DOG, rot_matrix, (size, size))
+				DOG_filters.append(DOG_rot)
+		return DOG_filters
+
+    
 
 def main():
 
 	"""
 	Generate Difference of Gaussian Filter Bank: (DoG)
 	Display all the filters in this filter bank and save image as DoG.png,
-	use command "cv2.imwrite(...)"
 	"""
+	filter_bank = FilterBank()
+	DOG_filters = filter_bank.dog_filter_bank()
+	fig, ax = plt.subplots(2, 16, figsize=(20, 3))
+	for i in range(2):
+		for j in range(16):
+			ax[i, j].imshow(DOG_filters[i*4 + j], cmap='gray')
+			ax[i, j].axis('off')
+			ax[i, j].set_xticks([])
+
+	plt.savefig('DoG.png')
+	plt.show()
+	plt.close()
+	
 
 
 	"""
