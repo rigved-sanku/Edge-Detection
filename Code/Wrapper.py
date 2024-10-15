@@ -26,43 +26,137 @@ class FilterBank:
 		pass
 	
  
-	def gaussian2D(self, grid, sigma, elongation=1):
+	def gaussian_filter(self, grid, sigma, elongation=1, elongate ='yes'):
 		"""
-		Returns a 2D Gaussian filter
+		Returns a 2D Gaussian filter.
+		grid: a tuple containing meshgrid of x and y coordinates.
+		sigma: standard deviation for Gaussian.
+		elongation: ratio between sigma_x and sigma_y.
 		"""
-		x = grid[0]
-		y = grid[1]
+		x, y = grid
 		sigma_x = sigma
-		sigma_y = sigma_x * elongation
-		numerator = np.exp(-(x**2/(2*sigma_x**2) + y**2/(2*sigma_y**2)))
+		
+		if elongate == 'yes':
+			sigma_y = elongation*sigma_x
+			
+		else:
+			sigma_y = sigma_x
+			
+		numerator = np.exp(-(x**2 / (2*sigma_x**2) + y**2 / (2*sigma_y**2)))
 		denominator = 2 * pi * sigma_x * sigma_y
 		return numerator / denominator
+ 
 
-
-	def dog_filter_bank(self, ):
-		scale_sigma = [1 , sqrt(2)]
-		sobel_x = [[1, 0, -1], [2, 0, -2], [1, 0, -1]] # Sobel filter in x direction
-		sobel_y = [[1, 2, 1], [0, 0, 0], [-1, -2, -1]] # Sobel filter in y direction
+	def derivative_gaussian_filter(self, grid, sigma, elongation, order, elongate = 'yes'):
+    
+		gaussian = self.gaussian_filter(grid, sigma, elongation, elongate)
+		x, y = grid
+		sigma_x = sigma
+		sigma_y = sigma_x * elongation
+		
+		# first partial x derivative
+		if order == [1, 0]:
+			first_derivate_x = (-x / sigma_x**2) * gaussian
+			return first_derivate_x
+		
+		# first partial y derivative
+		elif order == [0, 1]:
+			first_derivate_y = (-y / sigma_y**2) * gaussian
+			return first_derivate_y 
+		
+		# second partial x derivative
+		elif order == [2, 0]:
+			second_derivative_x = ((x**2 - sigma_x**2) / sigma_x**4) * gaussian
+			return second_derivative_x
+		
+		# second partial y derivative
+		elif order == [0, 2]:
+			second_derivative_y = ((y**2 - sigma_y**2) / sigma_y**4) * gaussian
+			return second_derivative_y
+		
+		# Laplacian of Gaussian
+		elif order == [2, 2]:
+			laplacian = ((x**2  + y**2 - 2* sigma**2) / sigma**4) * gaussian
+			return laplacian
+    
+	def dog_filter_bank(self):
+		"""
+		Generates a bank of 2D Derivative of Gaussian filters at multiple scales and orientations.
+		"""
+		scales = [1 , sqrt(2)]
+		sobel_x = np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]]) # Sobel filter in x direction
 		size = 7
 		angles = 16
 		bounds = size // 2
 		spread = np.linspace(-bounds, bounds, size)
 		x, y = np.meshgrid(spread, spread)
-		points = [x.flatten(), y.flatten()]
+		grid = (x, y)
 
-		DOG_filters = []
+		derivative_gaussian_filters = []
 
-		for sigma in scale_sigma:
-			gaussian = self.gaussian2D(points, sigma)
-			gaussian = reshape(gaussian, (size, size))
-			DOG = cv2.filter2D(gaussian, ddepth=-1, kernel = np.array(sobel_x))
+		for sigma in scales:
+			gaussian = self.gaussian_filter(grid, sigma)
+			gaussian = gaussian.reshape(size, size)
+   
+			# Apply Sobel filter to get the Derivative of Gaussian
+			dog_x = cv2.filter2D(gaussian, ddepth=-1, kernel=sobel_x)
+   			# Generate rotated filters 
 			for i in range(angles):
 				angle = i * 360 / angles
-				rot_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
-				DOG_rot = cv2.warpAffine(DOG, rot_matrix, (size, size))
-				DOG_filters.append(DOG_rot)
-		return DOG_filters
+				rotation_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
+				dog_x_rot = cv2.warpAffine(dog_x, rotation_matrix, (size, size))
+				derivative_gaussian_filters.append(dog_x_rot)
+    
+		return derivative_gaussian_filters
 
+	def LM(self, type):
+		size = 49
+		bound = size // 2
+		spread = np.linspace(-bound, bound, size)
+		x, y = np.meshgrid(spread, spread)
+		grid = (x, y)
+		elongation = 3
+		orientations = 6
+		
+		if type =='small':
+			scales = [1, sqrt(2), 2, 2*sqrt(2)]
+
+		else:
+			scales = [sqrt(2), 2, 2*sqrt(2), 4]
+			
+		LM_filters = []
+		for sigma in scales[:3]: 
+			first_derivate_x = self.derivative_gaussian_filter(grid, sigma, elongation, order = [1, 0], elongate = 'yes')
+			first_derivative_gaussian = first_derivate_x 
+			
+			second_derivative_x = self.derivative_gaussian_filter(grid, sigma, elongation, order = [2, 0], elongate = 'yes')
+			second_derivative_gaussian = second_derivative_x 
+			
+			for i in range(orientations):
+				angle = i * 360 / orientations
+				rot_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
+				first_derivative_rotated = cv2.warpAffine(first_derivative_gaussian, rot_matrix, (size, size))
+				LM_filters.append(first_derivative_rotated)
+
+			for i in range(orientations):
+				angle = i * 360 / orientations
+				rot_matrix = cv2.getRotationMatrix2D((size//2, size//2), angle, 1)
+				second_derivative_rotated = cv2.warpAffine(second_derivative_gaussian, rot_matrix, (size, size))
+				LM_filters.append(second_derivative_rotated)
+				
+		for sigma in scales:
+			laplacian = self.derivative_gaussian_filter(grid, sigma, elongation, order = [2, 2], elongate = 'no')
+			LM_filters.append(laplacian)
+			
+		for sigma in scales:
+			laplacian = self.derivative_gaussian_filter(grid, sigma*3, elongation, order = [2, 2], elongate = 'no')
+			LM_filters.append(laplacian)
+			
+		for sigma in scales:
+			gaussian = self.gaussian_filter(grid, sigma, elongation, elongate = 'no')
+			LM_filters.append(gaussian)
+			
+		return LM_filters
     
 
 def main():
@@ -80,18 +174,34 @@ def main():
 			ax[i, j].axis('off')
 			ax[i, j].set_xticks([])
 
-	plt.savefig('DoG.png')
+	plt.savefig('DoG1.png')
 	plt.show()
 	plt.close()
 	
-
-
 	"""
 	Generate Leung-Malik Filter Bank: (LM)
 	Display all the filters in this filter bank and save image as LM.png,
 	use command "cv2.imwrite(...)"
 	"""
+	LMs_filter_bank = filter_bank.LM('small')
+	fig, axs = plt.subplots(4, 12, figsize=(30, 10))
+	for i, filter in enumerate(LMs_filter_bank):
+		axs[i//12, i%12].imshow(filter, cmap='gray')
+		axs[i//12, i%12].axis('off')
+	
+	plt.savefig('LMs.png')
+	plt.show()
+	plt.close()
 
+	LMs_filter_bank = filter_bank.LM('large')
+	fig, axs = plt.subplots(4, 12, figsize=(30, 10))
+	for i, filter in enumerate(LMs_filter_bank):
+		axs[i//12, i%12].imshow(filter, cmap='gray')
+		axs[i//12, i%12].axis('off')
+  
+	plt.savefig('LMl.png')
+	plt.show()
+	plt.close()
 
 	"""
 	Generate Gabor Filter Bank: (Gabor)
